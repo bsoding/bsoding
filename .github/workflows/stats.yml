@@ -63,8 +63,8 @@ jobs:
               token_owner = json.load(response)["login"]
           if token_owner.lower() != os.environ["PROFILE_OWNER"].lower():
               raise SystemExit("GH_STATS_TOKEN must belong to the account that owns this profile.")
-          if "repo" not in scopes or not scopes.intersection({"read:user", "user"}):
-              raise SystemExit("GH_STATS_TOKEN needs a classic token with repo and read:user scopes to include private stats.")
+          if "repo" not in scopes:
+              raise SystemExit("GH_STATS_TOKEN needs a classic token with the repo scope to include private stats.")
           PY
 
       - name: Generate the light stats card
