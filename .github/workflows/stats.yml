@@ -1,0 +1,108 @@
+name: Update private GitHub stats
+
+on:
+  schedule:
+    - cron: "5 3 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/stats.yml
+      - .github/scripts/update-stats-readme.py
+
+permissions:
+  contents: write
+
+concurrency:
+  group: profile-stats
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Generate and publish private stats
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check for the private-stats token
+        id: token
+        env:
+          GH_STATS_TOKEN: ${{ secrets.GH_STATS_TOKEN }}
+        run: |
+          if [ -z "$GH_STATS_TOKEN" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Add an Actions secret named GH_STATS_TOKEN with a classic GitHub token (repo and read:user scopes), then run this workflow again." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the profile repository
+        if: steps.token.outputs.available == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+
+      - name: Verify the token owner and private-repository scopes
+        if: steps.token.outputs.available == 'true'
+        env:
+          GH_STATS_TOKEN: ${{ secrets.GH_STATS_TOKEN }}
+          PROFILE_OWNER: ${{ github.repository_owner }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+
+          request = Request("https://api.github.com/user", headers={
+              "Authorization": "Bearer " + os.environ["GH_STATS_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          })
+          with urlopen(request, timeout=30) as response:
+              scopes = {scope.strip() for scope in response.headers.get("X-OAuth-Scopes", "").split(",")}
+              token_owner = json.load(response)["login"]
+          if token_owner.lower() != os.environ["PROFILE_OWNER"].lower():
+              raise SystemExit("GH_STATS_TOKEN must belong to the account that owns this profile.")
+          if "repo" not in scopes or not scopes.intersection({"read:user", "user"}):
+              raise SystemExit("GH_STATS_TOKEN needs a classic token with repo and read:user scopes to include private stats.")
+          PY
+
+      - name: Generate the light stats card
+        if: steps.token.outputs.available == 'true'
+        uses: stats-organization/github-readme-stats-action@2c498845f71017821efaad14293ebc736156ef21 # v2.1.0
+        with:
+          card: stats
+          options: username=${{ github.repository_owner }}&show_icons=true&hide_border=true&include_all_commits=true&theme=default
+          path: profile/stats.svg
+          token: ${{ secrets.GH_STATS_TOKEN }}
+          core_version: 2.2.0
+          fail_on_error: true
+
+      - name: Generate the dark stats card
+        if: steps.token.outputs.available == 'true'
+        uses: stats-organization/github-readme-stats-action@2c498845f71017821efaad14293ebc736156ef21 # v2.1.0
+        with:
+          card: stats
+          options: username=${{ github.repository_owner }}&show_icons=true&hide_border=true&include_all_commits=true&theme=github_dark
+          path: profile/stats-dark.svg
+          token: ${{ secrets.GH_STATS_TOKEN }}
+          core_version: 2.2.0
+          fail_on_error: true
+
+      - name: Add the generated cards to the profile
+        if: steps.token.outputs.available == 'true'
+        run: python .github/scripts/update-stats-readme.py
+
+      - name: Commit the stats cards and README
+        if: steps.token.outputs.available == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md profile/stats.svg profile/stats-dark.svg
+          if git diff --cached --quiet; then
+            echo "Stats cards are already up to date." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git commit -m "Update private GitHub stats cards"
+          git push origin HEAD:main
+          echo "Updated the profile stats cards using GH_STATS_TOKEN, including accessible private repositories." >> "$GITHUB_STEP_SUMMARY"

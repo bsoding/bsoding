@@ -1,5 +1,8 @@
 <h1 align="center">Hi, I'm bsoding 👋</h1>
 
+<!-- github-stats:start -->
+<!-- github-stats:end -->
+
 <h2 align="center">Contribution snake</h2>
 
 <p align="center">
